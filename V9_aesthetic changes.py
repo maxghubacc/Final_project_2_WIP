@@ -117,12 +117,26 @@ LEVELS = [
 # ---------- Colors ----------
 BLACK = (0, 0, 0)
 WHITE = (240, 240, 240)
-GRAY = (35, 35, 35)
+
+# Retro dungeon palette
+BG_DARK = (10, 8, 20)
+BG_MID = (22, 18, 38)
+STONE = (58, 50, 72)
+STONE_DARK = (34, 28, 46)
+STONE_LIGHT = (88, 78, 104)
+MORTAR = (28, 22, 40)
+
+PURPLE_NEON = (185, 90, 255)
+CYAN_NEON = (80, 220, 255)
+MAGENTA_NEON = (255, 90, 220)
+GOLD = (255, 205, 90)
+RED_NEON = (255, 85, 85)
+LIME = (160, 255, 120)
+
 BLUE = (80, 170, 255)
-WALL = (120, 120, 120)
-YELLOW = (240, 220, 80)
-BONUS_COLOR = BLUE
-KEY_COLOR = (255, 215, 0)  # gold-ish
+BONUS_COLOR = CYAN_NEON
+KEY_COLOR = GOLD
+HUD_TEXT = (230, 225, 255)
 
 # ---------- Helpers ----------
 def draw_text(surface, text, size, color, center):
@@ -130,6 +144,18 @@ def draw_text(surface, text, size, color, center):
     surf = font.render(text, True, color)
     rect = surf.get_rect(center=center)
     surface.blit(surf, rect)
+
+def draw_glow_text(surface, text, size, color, glow_color, center):
+    font = pygame.font.SysFont("consolas", size, bold=True)
+    base = font.render(text, True, color)
+    rect = base.get_rect(center=center)
+
+    for dx, dy in [(-2, 0), (2, 0), (0, -2), (0, 2), (-1, -1), (1, 1), (-1, 1), (1, -1)]:
+        glow = font.render(text, True, glow_color)
+        glow_rect = glow.get_rect(center=(center[0] + dx, center[1] + dy))
+        surface.blit(glow, glow_rect)
+
+    surface.blit(base, rect)
 
 def validate_maze(maze):
     if not maze:
@@ -188,12 +214,24 @@ def allow_backtrack_direction(current_dir, new_dir):
 
 def apply_fog_of_war(surface, rows, cols, head_cell, radius):
     hx, hy = head_cell
+    fog = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+
     for r in range(rows):
         for c in range(cols):
-            dist = abs(c - hx) + abs(r - hy)  # Manhattan distance
+            dist = abs(c - hx) + abs(r - hy)
+            x, y = cell_to_px((c, r))
             if dist > radius:
-                x, y = cell_to_px((c, r))
-                pygame.draw.rect(surface, BLACK, (x, y, CELL_SIZE, CELL_SIZE))
+                alpha = 245
+            elif dist == radius:
+                alpha = 180
+            elif dist == radius - 1:
+                alpha = 100
+            else:
+                alpha = 0
+            if alpha > 0:
+                pygame.draw.rect(fog, (0, 0, 0, alpha), (x, y, CELL_SIZE, CELL_SIZE))
+
+    surface.blit(fog, (0, 0))
 
 def choose_enemy_initial_dir(maze, cell, rows, cols):
     candidates = [(1, 0), (-1, 0), (0, 1), (0, -1)]
@@ -222,9 +260,6 @@ def move_enemy_bounce(maze, pos, direction, rows, cols):
     return pos, direction
 
 def load_sprite(filename: str, cell_size: int):
-    """
-    Loads an image from the same folder as this script and scales it to cell_size.
-    """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     img_path = os.path.join(script_dir, filename)
 
@@ -240,14 +275,92 @@ def load_sprite(filename: str, cell_size: int):
     return img
 
 def rotated_sprite(img, direction):
-    # direction is (dx, dy)
-    if direction == (0, -1):   # up
+    if direction == (0, -1):
         return pygame.transform.rotate(img, 90)
-    if direction == (0, 1):    # down
+    if direction == (0, 1):
         return pygame.transform.rotate(img, -90)
-    if direction == (-1, 0):   # left
+    if direction == (-1, 0):
         return pygame.transform.rotate(img, 180)
-    return img  # right or (0,0)
+    return img
+
+# ---------- Retro Dungeon Drawing ----------
+def draw_dungeon_floor(surface, width, height):
+    surface.fill(BG_DARK)
+    tile = CELL_SIZE
+    for y in range(0, height, tile):
+        for x in range(0, width, tile):
+            base = BG_MID if ((x // tile) + (y // tile)) % 2 == 0 else BG_DARK
+            pygame.draw.rect(surface, base, (x, y, tile, tile))
+            pygame.draw.line(surface, (18, 14, 28), (x, y), (x + tile, y), 1)
+            pygame.draw.line(surface, (8, 6, 14), (x, y + tile - 1), (x + tile, y + tile - 1), 1)
+
+def draw_wall_tile(surface, x, y, size):
+    pygame.draw.rect(surface, STONE, (x, y, size, size))
+    pygame.draw.rect(surface, STONE_DARK, (x, y, size, size), 2)
+    pygame.draw.line(surface, STONE_LIGHT, (x + 1, y + 1), (x + size - 2, y + 1), 1)
+    pygame.draw.line(surface, STONE_LIGHT, (x + 1, y + 1), (x + 1, y + size - 2), 1)
+
+    half = size // 2
+    pygame.draw.line(surface, MORTAR, (x, y + half), (x + size, y + half), 2)
+
+    if (y // size) % 2 == 0:
+        pygame.draw.line(surface, MORTAR, (x + half, y), (x + half, y + half), 2)
+    else:
+        quarter = size // 4
+        pygame.draw.line(surface, MORTAR, (x + quarter, y), (x + quarter, y + half), 2)
+        pygame.draw.line(surface, MORTAR, (x + 3 * quarter, y), (x + 3 * quarter, y + half), 2)
+
+    if (y // size) % 2 == 1:
+        pygame.draw.line(surface, MORTAR, (x + half, y + half), (x + half, y + size), 2)
+    else:
+        quarter = size // 4
+        pygame.draw.line(surface, MORTAR, (x + quarter, y + half), (x + quarter, y + size), 2)
+        pygame.draw.line(surface, MORTAR, (x + 3 * quarter, y + half), (x + 3 * quarter, y + size), 2)
+
+def draw_bonus_orb(surface, center, radius):
+    pygame.draw.circle(surface, CYAN_NEON, center, radius)
+    pygame.draw.circle(surface, WHITE, center, max(2, radius // 2))
+    pygame.draw.circle(surface, PURPLE_NEON, center, radius, 1)
+
+def draw_key_orb(surface, center, radius):
+    pygame.draw.circle(surface, GOLD, center, radius)
+    pygame.draw.circle(surface, WHITE, center, max(2, radius // 2))
+    pygame.draw.circle(surface, (120, 80, 10), center, radius, 1)
+
+def draw_start_tile(surface, rect):
+    pygame.draw.rect(surface, (40, 30, 60), rect)
+    pygame.draw.rect(surface, PURPLE_NEON, rect, 2)
+    draw_glow_text(surface, "A", 18, WHITE, PURPLE_NEON, rect.center)
+
+def draw_exit_tile(surface, rect, locked=False):
+    if locked:
+        pygame.draw.rect(surface, (35, 45, 70), rect)
+        pygame.draw.rect(surface, MAGENTA_NEON, rect, 2)
+        draw_glow_text(surface, "LOCK", 12, WHITE, MAGENTA_NEON, rect.center)
+    else:
+        pygame.draw.rect(surface, (25, 55, 50), rect)
+        pygame.draw.rect(surface, CYAN_NEON, rect, 2)
+        draw_glow_text(surface, "EXIT", 12, WHITE, CYAN_NEON, rect.center)
+
+def draw_menu_background(surface):
+    w, h = surface.get_size()
+    surface.fill(BG_DARK)
+
+    for y in range(0, h, 8):
+        color = (12 + (y % 24), 8, 24 + (y % 32))
+        pygame.draw.line(surface, color, (0, y), (w, y))
+
+    frame = pygame.Rect(70, 55, w - 140, h - 110)
+    pygame.draw.rect(surface, (16, 10, 30), frame)
+    pygame.draw.rect(surface, PURPLE_NEON, frame, 3)
+    inner = frame.inflate(-18, -18)
+    pygame.draw.rect(surface, (8, 6, 18), inner)
+    pygame.draw.rect(surface, CYAN_NEON, inner, 1)
+
+    for x in range(inner.left, inner.right, 24):
+        pygame.draw.line(surface, (18, 12, 34), (x, inner.top), (x, inner.bottom), 1)
+    for y in range(inner.top, inner.bottom, 24):
+        pygame.draw.line(surface, (18, 12, 34), (inner.left, y), (inner.right, y), 1)
 
 # ---------- Game ----------
 def main():
@@ -501,67 +614,59 @@ def main():
                         reset_current_level()
 
         # ---- Draw ----
-        screen.fill(BLACK)
-
         if state == "MENU":
+            draw_menu_background(screen)
             w, h = screen.get_size()
-            draw_text(screen, "Method Man Maze Madness", 54, BLUE, (w // 2, h // 2 - 170))
-            draw_text(screen, "Select a Level:", 28, WHITE, (w // 2, h // 2 - 95))
-            draw_text(screen, "1 - Level 1", 26, WHITE, (w // 2, h // 2 - 45))
-            draw_text(screen, "2 - Level 2 (Fog of War)", 26, WHITE, (w // 2, h // 2 - 10))
-            draw_text(screen, "3 - Level 3", 26, WHITE, (w // 2, h // 2 + 25))
-            draw_text(screen, "4 - Level 4 (Key + Locked Exit)", 26, WHITE, (w // 2, h // 2 + 60))
-            draw_text(screen, "ESC - Quit", 20, WHITE, (w // 2, h // 2 + 140))
-            draw_text(screen, "Tip: Add 'E' or 'B' to ANY level map!", 18, WHITE, (w // 2, h // 2 + 180))
+
+            draw_glow_text(screen, "METHOD MAN", 44, GOLD, MAGENTA_NEON, (w // 2, h // 2 - 190))
+            draw_glow_text(screen, "MAZE MADNESS", 44, CYAN_NEON, PURPLE_NEON, (w // 2, h // 2 - 145))
+
+            draw_text(screen, "SELECT A DUNGEON", 24, HUD_TEXT, (w // 2, h // 2 - 85))
+            draw_text(screen, "1  -  LEVEL 1", 24, GOLD, (w // 2, h // 2 - 35))
+            draw_text(screen, "2  -  LEVEL 2  (FOG OF WAR)", 24, CYAN_NEON, (w // 2, h // 2 + 5))
+            draw_text(screen, "3  -  LEVEL 3  (ENEMIES)", 24, MAGENTA_NEON, (w // 2, h // 2 + 45))
+            draw_text(screen, "4  -  LEVEL 4  (KEY + EXIT)", 24, LIME, (w // 2, h // 2 + 85))
+            draw_text(screen, "ESC  -  QUIT", 18, HUD_TEXT, (w // 2, h // 2 + 145))
 
             if menu_error:
-                draw_text(screen, "Level error:", 22, (220, 60, 60), (w // 2, h // 2 + 220))
-                draw_text(screen, menu_error, 18, (220, 60, 60), (w // 2, h // 2 + 250))
+                draw_glow_text(screen, "LEVEL ERROR", 22, RED_NEON, MAGENTA_NEON, (w // 2, h // 2 + 210))
+                draw_text(screen, menu_error, 16, RED_NEON, (w // 2, h // 2 + 240))
 
             pygame.display.flip()
             clock.tick(30)
             continue
 
+        draw_dungeon_floor(screen, screen.get_width(), screen.get_height())
+
         # Walls
         for c, r in wall_cells:
             x, y = cell_to_px((c, r))
-            pygame.draw.rect(screen, WALL, (x, y, CELL_SIZE, CELL_SIZE))
+            draw_wall_tile(screen, x, y, CELL_SIZE)
 
         # Key (Level 4 only)
         if current_level == KEY_LEVEL_INDEX:
             for cell in key_cells:
                 if cell not in collected_keys:
                     kx, ky = cell_to_px(cell)
-                    pygame.draw.circle(
-                        screen,
-                        KEY_COLOR,
-                        (kx + CELL_SIZE // 2, ky + CELL_SIZE // 2),
-                        max(2, CELL_SIZE // 4),
-                    )
+                    draw_key_orb(screen, (kx + CELL_SIZE // 2, ky + CELL_SIZE // 2), max(3, CELL_SIZE // 4))
 
         # Bonus dots (map-driven)
         if bonuses_active:
             for cell in bonus_cells:
                 if cell not in collected_bonus:
                     bx, by = cell_to_px(cell)
-                    pygame.draw.circle(
-                        screen,
-                        BONUS_COLOR,
-                        (bx + CELL_SIZE // 2, by + CELL_SIZE // 2),
-                        max(2, CELL_SIZE // 4),
-                    )
+                    draw_bonus_orb(screen, (bx + CELL_SIZE // 2, by + CELL_SIZE // 2), max(3, CELL_SIZE // 4))
 
         # Goal (Exit)
+        goal_rect = pygame.Rect(goal_px[0], goal_px[1], CELL_SIZE, CELL_SIZE)
         if current_level == KEY_LEVEL_INDEX and not has_key:
-            pygame.draw.rect(screen, (60, 90, 130), (*goal_px, CELL_SIZE, CELL_SIZE))
-            draw_text(screen, "🔒", 18, WHITE, (goal_px[0] + CELL_SIZE // 2, goal_px[1] + CELL_SIZE // 2))
+            draw_exit_tile(screen, goal_rect, locked=True)
         else:
-            pygame.draw.rect(screen, BLUE, (*goal_px, CELL_SIZE, CELL_SIZE))
-            draw_text(screen, "B", 18, WHITE, (goal_px[0] + CELL_SIZE // 2, goal_px[1] + CELL_SIZE // 2))
+            draw_exit_tile(screen, goal_rect, locked=False)
 
         # Start
-        pygame.draw.rect(screen, GRAY, (*start_px, CELL_SIZE, CELL_SIZE), 2)
-        draw_text(screen, "A", 18, WHITE, (start_px[0] + CELL_SIZE // 2, start_px[1] + CELL_SIZE // 2))
+        start_rect = pygame.Rect(start_px[0], start_px[1], CELL_SIZE, CELL_SIZE)
+        draw_start_tile(screen, start_rect)
 
         # Enemies (map-driven) -> draw pac.png
         if enemies_active:
@@ -577,29 +682,32 @@ def main():
 
         # Popups
         if bonus_popup_ticks > 0:
-            draw_text(
+            draw_glow_text(
                 screen,
                 f"+{BONUS_POINTS}",
-                24,
-                BONUS_COLOR,
+                22,
+                CYAN_NEON,
+                PURPLE_NEON,
                 (bonus_popup_pos_px[0] + CELL_SIZE // 2, bonus_popup_pos_px[1] - 10),
             )
 
         if key_popup_ticks > 0:
-            draw_text(
+            draw_glow_text(
                 screen,
                 "KEY FOUND!",
-                24,
-                KEY_COLOR,
+                22,
+                GOLD,
+                MAGENTA_NEON,
                 (snake[0][0] + CELL_SIZE // 2, snake[0][1] - 10),
             )
 
         if need_key_popup_ticks > 0:
-            draw_text(
+            draw_glow_text(
                 screen,
                 "NEED KEY",
-                24,
-                KEY_COLOR,
+                22,
+                RED_NEON,
+                MAGENTA_NEON,
                 (snake[0][0] + CELL_SIZE // 2, snake[0][1] - 10),
             )
 
@@ -608,24 +716,30 @@ def main():
             head_cell = px_to_cell(snake[0])
             apply_fog_of_war(screen, rows, cols, head_cell, FOG_RADIUS)
 
-        # HUD (draw after fog so it's always visible)
-        w, _ = screen.get_size()
-        draw_text(screen, f"Moves: {moves}", 22, WHITE, (70, 16))
-        draw_text(screen, f"Lives: {lives}", 22, YELLOW, (w // 2, 16))
-        if bonuses_active:
-            draw_text(screen, f"Score: {score}", 22, BONUS_COLOR, (w - 110, 16))
-        if current_level == KEY_LEVEL_INDEX:
-            draw_text(screen, f"Key: {'YES' if has_key else 'NO'}", 22, KEY_COLOR, (w - 110, 40))
-        draw_text(screen, "M: Menu", 22, WHITE, (w - 70, 16))
+        # HUD
+        hud_rect = pygame.Rect(6, 6, screen.get_width() - 12, 46)
+        pygame.draw.rect(screen, (14, 10, 26), hud_rect)
+        pygame.draw.rect(screen, PURPLE_NEON, hud_rect, 2)
 
+        w, _ = screen.get_size()
+        draw_text(screen, f"MOVES: {moves}", 20, HUD_TEXT, (78, 28))
+        draw_text(screen, f"LIVES: {lives}", 20, GOLD, (w // 2, 28))
+        if bonuses_active:
+            draw_text(screen, f"SCORE: {score}", 20, CYAN_NEON, (w - 120, 28))
+        if current_level == KEY_LEVEL_INDEX:
+            draw_text(screen, f"KEY: {'YES' if has_key else 'NO'}", 18, KEY_COLOR, (w - 115, 52))
+        draw_text(screen, "M: MENU", 18, HUD_TEXT, (w - 70, 28))
+
+        # State messages
         if state == "WAITING":
-            draw_text(screen, "Press WASD / Arrow Keys to Start", 24, WHITE,
-                      (w // 2, (rows * CELL_SIZE) // 2))
-            draw_text(screen, "R: Restart level   M: Menu", 18, WHITE,
+            draw_glow_text(screen, "PRESS WASD / ARROWS TO BEGIN", 24, WHITE, PURPLE_NEON,
+                           (w // 2, (rows * CELL_SIZE) // 2))
+            draw_text(screen, "R: RESTART LEVEL   M: MENU", 18, HUD_TEXT,
                       (w // 2, (rows * CELL_SIZE) // 2 + 35))
         elif state == "WIN":
-            draw_text(screen, "YOU WIN!", 48, WHITE, (w // 2, (rows * CELL_SIZE) // 2 - 10))
-            draw_text(screen, "R: Replay level   M: Menu", 28, WHITE,
+            draw_glow_text(screen, "YOU ESCAPED THE DUNGEON!", 34, GOLD, MAGENTA_NEON,
+                           (w // 2, (rows * CELL_SIZE) // 2 - 10))
+            draw_text(screen, "R: REPLAY LEVEL   M: MENU", 24, CYAN_NEON,
                       (w // 2, (rows * CELL_SIZE) // 2 + 35))
 
         pygame.display.flip()
